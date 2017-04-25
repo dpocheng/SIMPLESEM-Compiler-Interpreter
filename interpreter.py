@@ -1,5 +1,6 @@
 import sys
 from tokenizer import Tokenizer
+import pdb
 
 class Interpreter:
     def __init__(self, codefile, infile):
@@ -16,157 +17,149 @@ class Interpreter:
         with open(codefile, 'r') as fread:
             self.C = fread.read().split('\n')
 
+
     def runProgram(self):
         while self.run_bit:
             self.fetch()
+            self.incrementPC()
             self.execute()
 
     def fetch(self):
         self.IR = self.C[self.PC]
 
     def incrementPC(self):
-        self.PC = self.PC + 1
+        self.PC += 1
 
     def execute(self):
         self.interpretStatement()
 
-    # interpretting grammar
     def interpretStatement(self):
         tokens = Tokenizer(self.IR)
-        # YOUR CODE HERE
         c = tokens.next()
+
+        # parse the code and interpret
         if c == 'set':
             self.interpretSet(tokens)
         elif c == 'jumpt':
             self.interpretJumpt(tokens)
         elif c == 'jump':
-            self.interpretJump(tokens)
+            line = self.interpretJump(tokens)
+            self.PC = line
         elif c == 'halt':
-            self.halt()
+            self.interpretHalt(tokens)
         else:
-            print 'HUGE ERROR: {0}'.format(c)
+            print "HUGE ERROR: {0}".format(c)
             sys.exit(0)
-
-    def interpretSet(self, tokens):
-        c = tokens.peek()
-        inst = 'normal'
-        if c == 'write':
-            c = tokens.next()
-            inst = 'write'
-        else:
-            lValue = self.interpretExpr(tokens)
-        c = tokens.next() # comma
-        c = tokens.peek()
-        if c != 'read':
-            rValue = self.interpretExpr(tokens)
-        else:
-            c = tokens.next()
-            inst = 'read'
-        if inst == 'normal':
-            self.D[lValue] = rValue
-        elif inst == 'write':
-            self.write(rValue)
-        elif inst == 'read':
-            rValue = self.read()
-            self.D[lValue] = rValue
-        self.incrementPC()
 
     def interpretJump(self, tokens):
         value = self.interpretExpr(tokens)
-        self.PC = value
+        return value
 
     def interpretJumpt(self, tokens):
-        boolean = False
-        value = self.interpretExpr(tokens)
-        c = tokens.next() # comma
-        lValue = self.interpretExpr(tokens)
-        op = tokens.next()
-        rValue = self.interpretExpr(tokens)
-        if op == '!=':
-            if lValue != rValue:
-                boolean = True
-        elif op == '==':
-            if lValue == rValue:
-                boolean = True
-        elif op == '>':
-            if lValue > rValue:
-                boolean = True
-        elif op == '<':
-            if lValue < rValue:
-                boolean = True
-        elif op == '>=':
-            if lValue >= rValue:
-                boolean = True
-        elif op == '<=':
-            if lValue <= rValue:
-                boolean = True
-        if boolean:
-            self.PC = value
+        line = self.interpretExpr(tokens)
+        c = tokens.next() # should be a comma
+        firstexpr = self.interpretExpr(tokens)
+        c = tokens.next()
+        if c not in ['!=', '==', '>', '<', '>=', '<=']:
+            print c
+            print "Error"
+        secondexpr = self.interpretExpr(tokens)
+        cond = False
+        if c == '!=': cond = (firstexpr != secondexpr)
+        elif c == '==': cond = (firstexpr == secondexpr)
+        elif c == '>': cond = (firstexpr > secondexpr)
+        elif c == '<': cond = (firstexpr < secondexpr)
+        elif c == '>=': cond = (firstexpr >= secondexpr)
+        elif c == '<=': cond = (firstexpr <= secondexpr)
+
+        if cond:
+            self.PC = line
+
+    def interpretSet(self, tokens):
+        c = tokens.peek()
+        is_write = False
+        is_read = False
+        if c == 'write':
+            c = tokens.next()
+            is_write = True
         else:
-            self.incrementPC()
-            
+            dest = self.interpretExpr(tokens)
+
+        c = tokens.next() # comma
+
+        c = tokens.peek()
+        if c == 'read':
+            c = tokens.next()
+            is_read = True
+        else:
+            source = self.interpretExpr(tokens)
+
+        if is_write:
+            self.write(source)
+        elif is_read:
+            self.D[dest] = self.read()
+        else: #D[destination] = source
+            self.D[dest] = source
+
 
     def interpretExpr(self, tokens):
-        lValue = self.interpretTerm(tokens)
+        total = self.interpretTerm(tokens)
         done = False
         while not done:
             c = tokens.peek()
-            if c in ['+', '-']:
+            if c == '+':
                 c = tokens.next()
-                op = c
-                rValue = self.interpretTerm(tokens)
-                if op == '+':
-                    lValue = lValue + rValue
-                else:
-                    lValue = lValue - rValue
+                total += self.interpretTerm(tokens)
+            elif c == '-':
+                c = tokens.next()
+                total -= self.interpretTerm(tokens)
             else:
                 done = True
-        return lValue
+        return total
 
     def interpretTerm(self, tokens):
-        lValue = self.interpretFactor(tokens)
+        total = self.interpretFactor(tokens)
         done = False
         while not done:
-            c = tokens.peek()
+            c = tokens.peek() # this should be * / or %
             if c in ['*', '/', '%']:
                 c = tokens.next()
-                op = c
-                rValue = self.interpretFactor(tokens)
-                if op == '*':
-                    lValue = lValue * rValue
-                elif op == '/':
-                    lValue = lValue / rValue
-                elif op == '%':
-                    lValue = lValue % rValue
+                value = self.interpretFactor(tokens)
+                if c == '*':
+                    total = total * value
+                elif c == '/':
+                    total = total / value
+                elif c == '%':
+                    total = total % value
             else:
                 done = True
-        return lValue
+
+        return total
 
     def interpretFactor(self, tokens):
         c = tokens.peek()
         if c == 'D':
             c = tokens.next() # D
             c = tokens.next() # [
-            value = self.interpretExpr(tokens)
+            value = self.D[self.interpretExpr(tokens)]
             c = tokens.next() # ]
-            lValue = int(self.D[value])
         elif c == '(':
             c = tokens.next() # (
-            lValue = self.interpretExpr(tokens)
+            value = self.interpretExpr(tokens)
             c = tokens.next() # )
         else:
-            lValue = self.interpretNumber(tokens)
-        return lValue
+            value = self.interpretNumber(tokens)
+        return value
 
     def interpretNumber(self, tokens):
         c = tokens.next()
         return int(c)
 
-    def halt(self):
+    def interpretHalt(self, tokens):
         self.run_bit = False
 
+    # DO NOT CHANGE
     def printDataSeg(self):
-        # DO NOT CHANGE
         self.outhandle.write("Data Segment Contents\n")
         for i in range(len(self.D)):
             self.outhandle.write('{0}: {1}\n'.format(i, self.D[i]))
